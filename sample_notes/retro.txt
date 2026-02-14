@@ -1,0 +1,16 @@
+Sprint Retro - Week 6
+
+What went well:
+- Team communication was clear during release week.
+- PR review turnaround stayed under 6 hours.
+- Incident response was fast and calm.
+
+What could improve:
+- Better estimates for integration-heavy tasks.
+- Earlier QA involvement for edge-case validation.
+- Fewer context switches during coding hours.
+
+Action items:
+- Start every story with a test plan note.
+- Block two no-meeting focus windows each week.
+- Track flaky tests with owners and due dates.
