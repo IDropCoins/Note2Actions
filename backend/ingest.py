@@ -2,6 +2,8 @@ import argparse
 import logging
 
 from config import Settings
+from discover import discover_note_files
+from loader import load_text
 from logger import setup_logging
 
 
@@ -25,6 +27,13 @@ def main() -> None:
     logger.info("Batch size: %s", args.batch_size)
     logger.info("Zvec path: %s", settings.ZVEC_DB_PATH)
     logger.info("Embedding model: %s", settings.EMBED_MODEL)
+
+    files = discover_note_files(args.path)
+    logger.info("Discovered %d note files", len(files))
+
+    for abs_path, rel_path in files:
+        text = load_text(abs_path)
+        logger.info("Loaded %s (%d chars)", rel_path, len(text))
 
 
 if __name__ == "__main__":
