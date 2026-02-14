@@ -6,6 +6,7 @@ from chunker import chunk_document
 from config import Settings
 from date_utils import infer_meeting_date
 from discover import discover_note_files
+from embedder import Embedder
 from loader import load_text
 from logger import setup_logging
 
@@ -33,6 +34,7 @@ def main() -> None:
 
     files = discover_note_files(args.path)
     logger.info("Discovered %d note files", len(files))
+    embedder = Embedder(settings.EMBED_MODEL, batch_size=args.batch_size)
 
     for abs_path, rel_path in files:
         stat = os.stat(abs_path)
@@ -49,10 +51,17 @@ def main() -> None:
             max_chars=settings.CHUNK_MAX_CHARS,
             overlap_chars=settings.CHUNK_OVERLAP_CHARS,
         )
+        texts = [chunk.text for chunk in chunks]
+        vectors = embedder.embed(texts) if texts else []
+        if len(vectors) != len(chunks):
+            raise RuntimeError(
+                f"Embedding count mismatch for {rel_path}: {len(vectors)} != {len(chunks)}"
+            )
 
         logger.info("Meeting date for %s -> %s", rel_path, meeting_date)
         logger.info("Document ID for %s -> %s", rel_path, doc_id)
         logger.info("Created %d chunks for %s", len(chunks), rel_path)
+        logger.info("Generated %d embeddings for %s", len(vectors), rel_path)
         logger.info("Loaded %s (%d chars)", rel_path, len(text))
 
 

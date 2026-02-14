@@ -12,11 +12,16 @@ backend/venv/
 .python-version
 .env
 .env.*
+backend/.hf_cache/
 
 # Test and coverage artifacts
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local ingestion/vector data
+zvec_db/
+backend/zvec_db/
 
 # OS/editor noise
 .DS_Store
