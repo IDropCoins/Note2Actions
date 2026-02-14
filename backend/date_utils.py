@@ -3,10 +3,11 @@ from datetime import date, datetime
 from typing import Optional
 
 import dateparser
+from dateparser.search import search_dates
 
 
 FILENAME_DATE_PATTERN = re.compile(
-    r"(\d{4}[-_/]\d{2}[-_/]\d{2})|" r"(\d{2}[-_/]\d{2}[-_/]\d{4})"
+    r"(\d{4}[-_/]\d{2}[-_/]\d{2})|(\d{2}[-_/]\d{2}[-_/]\d{4})"
 )
 
 
@@ -42,12 +43,11 @@ def infer_meeting_date(
     # Look for lines like:
     # Date: Feb 14 2026
     # ## 14 Feb 2026
-    potential_lines = re.findall(r".{0,50}\d{1,4}.+", first_lines)
-
-    for line in potential_lines:
-        parsed = _parse_date(line)
-        if parsed:
-            return parsed
+    # # Engineering Standup - Feb 13
+    found_dates = search_dates(first_lines)
+    if found_dates:
+        for _, parsed_datetime in found_dates:
+            return parsed_datetime.date()
 
     # 3) Fallback to file modified time
     return datetime.fromtimestamp(file_mtime).date()
