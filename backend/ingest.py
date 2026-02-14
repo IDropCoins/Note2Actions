@@ -1,7 +1,9 @@
 import argparse
 import logging
+import os
 
 from config import Settings
+from date_utils import infer_meeting_date
 from discover import discover_note_files
 from loader import load_text
 from logger import setup_logging
@@ -32,7 +34,15 @@ def main() -> None:
     logger.info("Discovered %d note files", len(files))
 
     for abs_path, rel_path in files:
+        stat = os.stat(abs_path)
         text = load_text(abs_path)
+        meeting_date = infer_meeting_date(
+            relative_path=rel_path,
+            text=text,
+            file_mtime=stat.st_mtime,
+        )
+
+        logger.info("Meeting date for %s -> %s", rel_path, meeting_date)
         logger.info("Loaded %s (%d chars)", rel_path, len(text))
 
 
