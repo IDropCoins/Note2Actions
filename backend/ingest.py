@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 
+from chunker import chunk_document
 from config import Settings
 from date_utils import infer_meeting_date
 from discover import discover_note_files
@@ -41,8 +42,17 @@ def main() -> None:
             text=text,
             file_mtime=stat.st_mtime,
         )
+        doc_id, chunks = chunk_document(
+            source_file=rel_path,
+            text=text,
+            meeting_date=meeting_date,
+            max_chars=settings.CHUNK_MAX_CHARS,
+            overlap_chars=settings.CHUNK_OVERLAP_CHARS,
+        )
 
         logger.info("Meeting date for %s -> %s", rel_path, meeting_date)
+        logger.info("Document ID for %s -> %s", rel_path, doc_id)
+        logger.info("Created %d chunks for %s", len(chunks), rel_path)
         logger.info("Loaded %s (%d chars)", rel_path, len(text))
 
 
