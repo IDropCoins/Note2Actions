@@ -6,9 +6,12 @@ import zvec
 from ingest.core import Chunk
 
 
+_BACKEND_DIR = Path(__file__).resolve().parent
+
+
 class ZvecStore:
     def __init__(self, db_path: str):
-        self.db_path = db_path
+        self.db_path = str(_BACKEND_DIR / db_path)
         self.collection: Optional[zvec.Collection] = None
         self.vector_field_name = "embedding"
 
@@ -76,3 +79,19 @@ class ZvecStore:
 
         self.collection.upsert(docs)
         self.collection.flush()
+
+    def search(self, query_vector: List[float], top_k: int = 5) -> List[zvec.Doc]:
+        """
+        Search for nearest chunks by vector similarity.
+        """
+        if self.collection is None:
+            path = Path(self.db_path)
+            if path.exists():
+                self.collection = zvec.open(str(path))
+            else:
+                raise RuntimeError("Zvec collection was not initialized")
+
+        return self.collection.query(
+            zvec.VectorQuery(field_name=self.vector_field_name, vector=query_vector),
+            topk=top_k,
+        )

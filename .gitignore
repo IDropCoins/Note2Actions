@@ -12,6 +12,7 @@ backend/venv/
 .python-version
 .env
 .env.*
+.hf_cache/
 backend/.hf_cache/
 
 # Test and coverage artifacts
