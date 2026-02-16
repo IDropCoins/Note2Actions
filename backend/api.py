@@ -3,14 +3,21 @@ from pydantic import BaseModel
 from typing import Any, Dict, List
 
 from config import Settings
+from extraction import extract_actions
 from ingest.embedding import Embedder
 from storage import ZvecStore
+
 
 class HealthResponse(BaseModel):
     status: str
 
 
 class SearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
+class ExtractRequest(BaseModel):
     query: str
     top_k: int = 5
 
@@ -47,3 +54,8 @@ def search_notes(request: SearchRequest) -> Dict[str, Any]:
         "query": request.query,
         "results": results,
     }
+
+
+@app.post("/extract")
+def extract_notes(request: ExtractRequest) -> Dict[str, Any]:
+    return extract_actions(query=request.query, top_k=request.top_k)
