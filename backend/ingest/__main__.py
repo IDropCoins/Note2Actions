@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,10 +105,13 @@ def main() -> None:
         )
 
         texts = [chunk.text for chunk in chunks]
+        t0 = time.time()
         vectors = embedder.embed(texts) if texts else []
+        logger.info("Embedding time for %s: %.3fs", rel_path, time.time() - t0)
         if len(vectors) != len(chunks):
             raise RuntimeError(
-                f"Embedding count mismatch for {rel_path}: {len(vectors)} != {len(chunks)}"
+                f"Invariant violated: chunk/vector count mismatch for {rel_path}: "
+                f"{len(vectors)} vectors != {len(chunks)} chunks"
             )
 
         store.upsert(chunks, vectors)

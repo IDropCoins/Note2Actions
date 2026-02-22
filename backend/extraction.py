@@ -1,5 +1,7 @@
 """Structured extraction from meeting notes with grounded evidence."""
 
+import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -10,6 +12,8 @@ from langextract.data import CharInterval, ExampleData, Extraction
 from config import Settings
 from ingest.embedding import Embedder
 from storage import ZvecStore
+
+logger = logging.getLogger("minutesmind.extraction")
 
 settings = Settings()
 embedder = Embedder(settings.embed_model)
@@ -92,11 +96,15 @@ def _build_context_with_map(search_results: List[Any]) -> Tuple[str, List[dict]]
     return combined_context, chunk_map
 
 
-def _map_span_to_chunk(chunk_map: List[dict], start: int, end: int) -> Optional[dict]:
+def _map_span_to_chunk(
+    chunk_map: List[dict], start: int, end: int, context_len: int = 0
+) -> Optional[dict]:
     """Return evidence if a span fits fully within one chunk; otherwise return None."""
     if start is None or end is None:
         return None
     if start < 0 or end < 0 or end <= start:
+        return None
+    if context_len > 0 and (start >= context_len or end > context_len):
         return None
 
     for chunk in chunk_map:
@@ -264,7 +272,7 @@ def _build_bucket_item(
 
 
 def _normalize_extraction(
-    extraction: Any, chunk_map: List[dict]
+    extraction: Any, chunk_map: List[dict], context_len: int = 0
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     extraction_type = (_get_attr(extraction, "extraction_class", "") or "").strip().lower()
     bucket = _CLASS_TO_BUCKET.get(extraction_type)
@@ -278,7 +286,7 @@ def _normalize_extraction(
 
     if not isinstance(global_start, int) or not isinstance(global_end, int):
         return None
-    evidence = _map_span_to_chunk(chunk_map, global_start, global_end)
+    evidence = _map_span_to_chunk(chunk_map, global_start, global_end, context_len)
     if evidence is None:
         return None
 
@@ -359,15 +367,39 @@ def _dedupe_bucket_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return deduped
 
 
+_EMPTY_RESULTS: Dict[str, List[Any]] = {
+    "decisions": [],
+    "action_items": [],
+    "deadlines": [],
+    "open_questions": [],
+    "risks": [],
+}
+
+
+def _retrieved_chunks_payload(search_results: List[Any]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "chunk_id": getattr(doc, "id", None) or _doc_metadata(doc).get("chunk_id"),
+            "source_file": _doc_metadata(doc).get("source_file"),
+            "meeting_date": _doc_metadata(doc).get("meeting_date"),
+            "score": getattr(doc, "score", None),
+        }
+        for doc in search_results
+    ]
+
+
 def extract_actions(query: str, top_k: int = 5) -> Dict[str, Any]:
     # 1) Search
+    t0 = time.time()
     query_vector = embedder.embed([query])[0]
     search_results = _dedupe_search_results(store.search(query_vector, top_k=top_k))
+    logger.info("Search + dedupe: %.3fs (%d results)", time.time() - t0, len(search_results))
 
     # 2) Build combined context + offset map
     combined_context, chunk_map = _build_context_with_map(search_results)
+    context_len = len(combined_context)
 
-    # 3) LangExtract call
+    # 3) LangExtract call (wrapped safely)
     prompt = """
     Extract the following from the text, only when clearly supported:
 
@@ -382,24 +414,30 @@ def extract_actions(query: str, top_k: int = 5) -> Dict[str, Any]:
     Do not hallucinate missing fields.
     """
 
-    result = lx.extract(
-        text_or_documents=combined_context,
-        prompt_description=prompt,
-        examples=EXTRACTION_EXAMPLES,
-        model_id="gemini-2.5-flash",
-    )
+    t1 = time.time()
+    try:
+        result = lx.extract(
+            text_or_documents=combined_context,
+            prompt_description=prompt,
+            examples=EXTRACTION_EXAMPLES,
+            model_id="gemini-2.5-flash",
+        )
+    except Exception:
+        logger.exception("LangExtract failed for query=%r", query)
+        return {
+            "query": query,
+            "top_k": top_k,
+            "error": "Extraction failed",
+            "results": dict(_EMPTY_RESULTS),
+            "retrieved_chunks": _retrieved_chunks_payload(search_results),
+        }
+    logger.info("LangExtract: %.3fs", time.time() - t1)
 
     # 4) Normalize into API shape with chunk-level evidence
-    grouped: Dict[str, List[Dict[str, Any]]] = {
-        "decisions": [],
-        "action_items": [],
-        "deadlines": [],
-        "open_questions": [],
-        "risks": [],
-    }
+    grouped: Dict[str, List[Dict[str, Any]]] = dict(_EMPTY_RESULTS)
 
     for ex in _iter_extractions(result):
-        normalized = _normalize_extraction(ex, chunk_map)
+        normalized = _normalize_extraction(ex, chunk_map, context_len)
         if normalized is None:
             continue
 
@@ -413,13 +451,5 @@ def extract_actions(query: str, top_k: int = 5) -> Dict[str, Any]:
         "query": query,
         "top_k": top_k,
         "results": grouped,
-        "retrieved_chunks": [
-            {
-                "chunk_id": getattr(doc, "id", None) or _doc_metadata(doc).get("chunk_id"),
-                "source_file": _doc_metadata(doc).get("source_file"),
-                "meeting_date": _doc_metadata(doc).get("meeting_date"),
-                "score": getattr(doc, "score", None),
-            }
-            for doc in search_results
-        ],
+        "retrieved_chunks": _retrieved_chunks_payload(search_results),
     }
