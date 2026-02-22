@@ -180,6 +180,24 @@ def _parse_due_date(raw: str, base_meeting_date: Optional[str]) -> Optional[str]
     return parsed.date().isoformat()
 
 
+def _owner_is_grounded(owner: Optional[str], evidence: Dict[str, Any]) -> bool:
+    """Return True only if the owner string appears in the evidence snippet or chunk text."""
+    if not owner:
+        return False
+    snippet = evidence.get("snippet") or ""
+    if owner.lower() in snippet.lower():
+        return True
+    chunk_text = evidence.get("text") or ""
+    return owner.lower() in chunk_text.lower()
+
+
+def _validated_owner(attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Optional[str]:
+    owner = _norm_str(attrs.get("owner"))
+    if owner and _owner_is_grounded(owner, evidence):
+        return owner
+    return None
+
+
 def _as_decision(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "text": ex_text,
@@ -195,7 +213,7 @@ def _as_action_item(
     normalized_due = _parse_due_date(raw_due, _norm_str(evidence.get("meeting_date")))
     return {
         "task": _norm_str(attrs.get("task")) or ex_text,
-        "owner": _norm_str(attrs.get("owner")),
+        "owner": _validated_owner(attrs, evidence),
         "due_date": normalized_due,
         "due_date_raw": raw_due,
         "priority": _norm_str(attrs.get("priority")),
@@ -221,7 +239,7 @@ def _as_open_question(
 ) -> Dict[str, Any]:
     return {
         "question": _norm_str(attrs.get("question")) or ex_text,
-        "owner": _norm_str(attrs.get("owner")),
+        "owner": _validated_owner(attrs, evidence),
         "confidence": _norm_conf(attrs),
         "evidence": evidence,
     }
