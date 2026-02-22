@@ -1,6 +1,8 @@
 import argparse
 import logging
 import os
+import shutil
+from pathlib import Path
 
 from config import Settings
 from ingest.core import chunk_document, discover_note_files, infer_meeting_date, load_text
@@ -9,6 +11,22 @@ from logger import setup_logging
 from storage import ZvecStore
 
 logger = logging.getLogger("minutesmind.ingest")
+
+
+def _resolve_store_path(configured_path: str) -> Path:
+    path = Path(configured_path)
+    if path.is_absolute():
+        return path
+    return (Path(__file__).resolve().parent.parent / path).resolve()
+
+
+def _clear_store_path(store_path: Path) -> None:
+    if not store_path.exists():
+        return
+    if store_path.is_dir():
+        shutil.rmtree(store_path)
+        return
+    store_path.unlink()
 
 
 def main() -> None:
@@ -28,6 +46,11 @@ def main() -> None:
     logger.info("Batch size: %s", args.batch_size)
     logger.info("Zvec path: %s", settings.zvec_db_path)
     logger.info("Embedding model: %s", settings.embed_model)
+
+    if args.rebuild:
+        store_path = _resolve_store_path(settings.zvec_db_path)
+        _clear_store_path(store_path)
+        logger.info("Rebuild requested: cleared Zvec store at %s", store_path)
 
     files = discover_note_files(args.path)
     logger.info("Discovered %d note files", len(files))
