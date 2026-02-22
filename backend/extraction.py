@@ -13,24 +13,6 @@ settings = Settings()
 embedder = Embedder(settings.embed_model)
 store = ZvecStore(settings.zvec_db_path)
 
-_TYPE_TO_BUCKET = {
-    "decision": "decisions",
-    "decisions": "decisions",
-    "action_item": "action_items",
-    "action items": "action_items",
-    "actionitem": "action_items",
-    "task": "action_items",
-    "deadline": "deadlines",
-    "deadlines": "deadlines",
-    "due_date": "deadlines",
-    "due date": "deadlines",
-    "open_question": "open_questions",
-    "open questions": "open_questions",
-    "question": "open_questions",
-    "risk": "risks",
-    "risks": "risks",
-}
-
 _EXAMPLE_TEXT = (
     "## Decisions\n"
     "- Keep the current signup copy for one more week.\n\n"
@@ -140,6 +122,133 @@ def _get_attr(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
     return default
+
+
+def _norm_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized if normalized else None
+
+
+def _norm_conf(attrs: Dict[str, Any]) -> str:
+    # If the model provides confidence, pass it through unchanged.
+    for key in ("confidence", "conf", "score"):
+        value = attrs.get(key)
+        if value is None:
+            continue
+        return str(value)
+    return "unknown"
+
+
+def _as_decision(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "text": ex_text,
+        "confidence": _norm_conf(attrs),
+        "evidence": evidence,
+    }
+
+
+def _as_action_item(
+    ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {
+        "task": _norm_str(attrs.get("task")) or ex_text,
+        "owner": _norm_str(attrs.get("owner")),
+        "due_date": _norm_str(attrs.get("due_date") or attrs.get("deadline")),
+        "priority": _norm_str(attrs.get("priority")),
+        "confidence": _norm_conf(attrs),
+        "evidence": evidence,
+    }
+
+
+def _as_deadline(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "label": _norm_str(attrs.get("label")) or ex_text,
+        "due_date": _norm_str(attrs.get("due_date") or attrs.get("deadline")),
+        "confidence": _norm_conf(attrs),
+        "evidence": evidence,
+    }
+
+
+def _as_open_question(
+    ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {
+        "question": _norm_str(attrs.get("question")) or ex_text,
+        "owner": _norm_str(attrs.get("owner")),
+        "confidence": _norm_conf(attrs),
+        "evidence": evidence,
+    }
+
+
+def _as_risk(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "risk": _norm_str(attrs.get("risk")) or ex_text,
+        "severity": _norm_str(attrs.get("severity")),
+        "confidence": _norm_conf(attrs),
+        "evidence": evidence,
+    }
+
+
+_CLASS_TO_BUCKET = {
+    "decision": "decisions",
+    "decisions": "decisions",
+    "action_item": "action_items",
+    "action items": "action_items",
+    "actionitem": "action_items",
+    "task": "action_items",
+    "deadline": "deadlines",
+    "deadlines": "deadlines",
+    "due_date": "deadlines",
+    "due date": "deadlines",
+    "open_question": "open_questions",
+    "open questions": "open_questions",
+    "question": "open_questions",
+    "risk": "risks",
+    "risks": "risks",
+}
+
+
+def _build_bucket_item(
+    bucket: str, ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    if bucket == "decisions":
+        return _as_decision(ex_text, attrs, evidence)
+    if bucket == "action_items":
+        return _as_action_item(ex_text, attrs, evidence)
+    if bucket == "deadlines":
+        return _as_deadline(ex_text, attrs, evidence)
+    if bucket == "open_questions":
+        return _as_open_question(ex_text, attrs, evidence)
+    if bucket == "risks":
+        return _as_risk(ex_text, attrs, evidence)
+    return None
+
+
+def _normalize_extraction(
+    extraction: Any, chunk_map: List[dict]
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    extraction_type = (_get_attr(extraction, "extraction_class", "") or "").strip().lower()
+    bucket = _CLASS_TO_BUCKET.get(extraction_type)
+    if bucket is None:
+        return None
+
+    ex_text = _get_attr(extraction, "extraction_text", "") or ""
+    ex_attrs_raw = _get_attr(extraction, "attributes", {}) or {}
+    ex_attrs = ex_attrs_raw if isinstance(ex_attrs_raw, dict) else {}
+    global_start, global_end = _resolve_offsets(extraction)
+
+    if not isinstance(global_start, int) or not isinstance(global_end, int):
+        return None
+    evidence = _map_span_to_chunk(chunk_map, global_start, global_end)
+    if evidence is None:
+        return None
+
+    item = _build_bucket_item(bucket, ex_text, ex_attrs, evidence)
+    if item is None:
+        return None
+    return bucket, item
 
 
 def _resolve_offsets(extraction: Any) -> Tuple[Optional[int], Optional[int]]:
@@ -253,29 +362,12 @@ def extract_actions(query: str, top_k: int = 5) -> Dict[str, Any]:
     }
 
     for ex in _iter_extractions(result):
-        ex_type = _get_attr(ex, "extraction_class", "") or ""
-        ex_text = _get_attr(ex, "extraction_text", "") or ""
-        ex_attrs = _get_attr(ex, "attributes", {}) or {}
-        global_start, global_end = _resolve_offsets(ex)
-
-        evidence = None
-        if isinstance(global_start, int) and isinstance(global_end, int):
-            evidence = _map_span_to_chunk(chunk_map, global_start, global_end)
-
-        # Keep output strictly grounded.
-        if evidence is None:
+        normalized = _normalize_extraction(ex, chunk_map)
+        if normalized is None:
             continue
 
-        item: Dict[str, Any] = {
-            "text": ex_text,
-            "attributes": ex_attrs,
-            "evidence": evidence,
-        }
-
-        extraction_type = ex_type.strip().lower()
-        bucket = _TYPE_TO_BUCKET.get(extraction_type)
-        if bucket:
-            grouped[bucket].append(item)
+        bucket, item = normalized
+        grouped[bucket].append(item)
 
     for bucket_name, bucket_items in grouped.items():
         grouped[bucket_name] = _dedupe_bucket_items(bucket_items)
