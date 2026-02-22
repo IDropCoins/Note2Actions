@@ -11,7 +11,7 @@ It ingests raw meeting notes and converts them into:
 
 All extracted outputs are grounded to exact evidence spans.
 
-## What It Does
+## 🧩 What It Does
 
 ### 1) Ingestion
 - Reads `.md` and `.txt` notes
@@ -45,7 +45,7 @@ All extracted outputs are grounded to exact evidence spans.
   - `end_char`
   - `snippet`
 
-## Architecture
+## 🏗️ Architecture
 
 ```text
 Raw Notes
@@ -71,7 +71,7 @@ backend/
   config.py
 ```
 
-## Prerequisites
+## ⚙️ Prerequisites
 
 | Dependency | Required For |
 |---|---|
@@ -84,7 +84,7 @@ backend/
 
 Zvec is an open-source, embedded vector database from Alibaba Tongyi Lab. It is designed to run in-process (SQLite-style), so you do not need a separate vector DB server. In this project, Zvec stores chunk embeddings and metadata locally on disk (`./zvec_db`), and powers retrieval for both `/search` and `/extract`.
 
-## Installation
+## 🧾 Installation
 
 ```bash
 # From project root
@@ -97,7 +97,7 @@ cp .env.example .env
 # set LANGEXTRACT_API_KEY in .env
 ```
 
-## Ingest Notes
+## 📥 Ingest Notes
 
 Place notes in `sample_notes/`, then run:
 
@@ -121,7 +121,7 @@ zvec_db/manifest.json
 
 Unchanged files are skipped automatically when `--rebuild` is not set.
 
-## Run API
+## 🚀 Run API
 
 ```bash
 # from project root
@@ -130,7 +130,7 @@ uvicorn main:app --reload
 
 Open API docs at `http://127.0.0.1:8000/docs`.
 
-## API Examples
+## 🧪 API Examples
 
 ### `POST /search`
 
@@ -157,7 +157,7 @@ Open API docs at `http://127.0.0.1:8000/docs`.
 
 Response includes structured categories, normalized due dates, owner validation, and grounded evidence.
 
-## Testing
+## 🧪 Testing
 
 Run all backend tests:
 
@@ -172,13 +172,13 @@ Coverage includes:
 - Due date normalization
 - Owner validation
 
-## Privacy
+## 🔐 Privacy
 
 - No external vector DB
 - No cloud vector storage
 - Local Zvec only
 
-## Project Status
+## 📌 Project Status
 
 - Backend Core: Complete
 - Semantic Search: Complete
@@ -186,7 +186,7 @@ Coverage includes:
 - Production Hardening: Implemented
 - Frontend: Optional
 
-## Why Note2Action
+## 🌟 Why Note2Action
 
 Many note tools summarize loosely and lose traceability.
 
@@ -196,7 +196,7 @@ Note2Action follows a stricter flow:
 3. Keep everything grounded
 4. Avoid fabricated owners or dates
 
-## License
+## 🪄 License
 
 This project is licensed under the MIT License.
 
