@@ -1,7 +1,9 @@
 """Structured extraction from meeting notes with grounded evidence."""
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import dateparser
 import langextract as lx
 from langextract.data import CharInterval, ExampleData, Extraction
 
@@ -141,6 +143,35 @@ def _norm_conf(attrs: Dict[str, Any]) -> str:
     return "unknown"
 
 
+def _parse_due_date(raw: str, base_meeting_date: Optional[str]) -> Optional[str]:
+    """
+    Convert raw due date text into ISO date (YYYY-MM-DD) using meeting_date as base.
+    base_meeting_date is expected as YYYY-MM-DD.
+    """
+    candidate = (raw or "").strip()
+    if not candidate:
+        return None
+
+    base_dt = None
+    if base_meeting_date:
+        try:
+            base_dt = datetime.fromisoformat(base_meeting_date)
+        except ValueError:
+            base_dt = None
+
+    parsed = dateparser.parse(
+        candidate,
+        settings={
+            "RELATIVE_BASE": base_dt or datetime.now(),
+            "PREFER_DATES_FROM": "future",
+        },
+    )
+    if not parsed:
+        return None
+
+    return parsed.date().isoformat()
+
+
 def _as_decision(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "text": ex_text,
@@ -152,10 +183,13 @@ def _as_decision(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) 
 def _as_action_item(
     ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]
 ) -> Dict[str, Any]:
+    raw_due = _norm_str(attrs.get("due_date") or attrs.get("deadline"))
+    normalized_due = _parse_due_date(raw_due, _norm_str(evidence.get("meeting_date")))
     return {
         "task": _norm_str(attrs.get("task")) or ex_text,
         "owner": _norm_str(attrs.get("owner")),
-        "due_date": _norm_str(attrs.get("due_date") or attrs.get("deadline")),
+        "due_date": normalized_due,
+        "due_date_raw": raw_due,
         "priority": _norm_str(attrs.get("priority")),
         "confidence": _norm_conf(attrs),
         "evidence": evidence,
@@ -163,9 +197,12 @@ def _as_action_item(
 
 
 def _as_deadline(ex_text: str, attrs: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    raw_due = _norm_str(attrs.get("due_date") or attrs.get("deadline"))
+    normalized_due = _parse_due_date(raw_due, _norm_str(evidence.get("meeting_date")))
     return {
         "label": _norm_str(attrs.get("label")) or ex_text,
-        "due_date": _norm_str(attrs.get("due_date") or attrs.get("deadline")),
+        "due_date": normalized_due,
+        "due_date_raw": raw_due,
         "confidence": _norm_conf(attrs),
         "evidence": evidence,
     }
