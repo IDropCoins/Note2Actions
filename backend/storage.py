@@ -46,6 +46,20 @@ class ZvecStore:
         )
         self.collection = zvec.create_and_open(str(path), schema)
 
+    def _open_existing_collection(self) -> bool:
+        if self.collection is not None:
+            return True
+        path = Path(self.db_path)
+        if not path.exists():
+            return False
+        self.collection = zvec.open(str(path))
+        return True
+
+    @staticmethod
+    def _quote_filter_value(value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
+
     def upsert(self, chunks: List[Chunk], vectors: List[List[float]]) -> None:
         """
         Insert or update chunk embeddings in Zvec.
@@ -80,16 +94,27 @@ class ZvecStore:
         self.collection.upsert(docs)
         self.collection.flush()
 
+    def delete_by_source_file(self, source_file: str) -> None:
+        """
+        Delete all chunks for a source file to avoid duplicate active versions.
+        """
+        if not self._open_existing_collection():
+            return
+        if self.collection is None:
+            return
+
+        filter_expr = f"source_file = {self._quote_filter_value(source_file)}"
+        self.collection.delete_by_filter(filter_expr)
+        self.collection.flush()
+
     def search(self, query_vector: List[float], top_k: int = 5) -> List[zvec.Doc]:
         """
         Search for nearest chunks by vector similarity.
         """
+        if not self._open_existing_collection():
+            raise RuntimeError("Zvec collection was not initialized")
         if self.collection is None:
-            path = Path(self.db_path)
-            if path.exists():
-                self.collection = zvec.open(str(path))
-            else:
-                raise RuntimeError("Zvec collection was not initialized")
+            raise RuntimeError("Zvec collection was not initialized")
 
         return self.collection.query(
             zvec.VectorQuery(field_name=self.vector_field_name, vector=query_vector),

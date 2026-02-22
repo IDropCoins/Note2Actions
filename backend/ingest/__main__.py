@@ -2,11 +2,13 @@ import argparse
 import logging
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import Settings
 from ingest.core import chunk_document, discover_note_files, infer_meeting_date, load_text
 from ingest.embedding import Embedder
+from ingest.manifest import load_manifest, save_manifest
 from logger import setup_logging
 from storage import ZvecStore
 
@@ -27,6 +29,12 @@ def _clear_store_path(store_path: Path) -> None:
         shutil.rmtree(store_path)
         return
     store_path.unlink()
+
+
+def _manifest_path_for_store(store_path: Path) -> Path:
+    if store_path.suffix:
+        return store_path.parent / "manifest.json"
+    return store_path / "manifest.json"
 
 
 def main() -> None:
@@ -56,9 +64,31 @@ def main() -> None:
     logger.info("Discovered %d note files", len(files))
     embedder = Embedder(settings.embed_model, batch_size=args.batch_size)
     store = ZvecStore(settings.zvec_db_path)
+    store_path = _resolve_store_path(settings.zvec_db_path)
+    manifest_path = _manifest_path_for_store(store_path)
+    manifest = load_manifest(manifest_path)
+    manifest_files = manifest.setdefault("files", {})
 
     for abs_path, rel_path in files:
         stat = os.stat(abs_path)
+        mtime = float(stat.st_mtime)
+        mtime_ns = int(stat.st_mtime_ns)
+        size = int(stat.st_size)
+        previous = manifest_files.get(rel_path, {})
+        prev_mtime = previous.get("mtime")
+        prev_mtime_ns = previous.get("mtime_ns")
+        prev_size = previous.get("size")
+
+        unchanged = prev_size == size and (
+            prev_mtime_ns == mtime_ns or prev_mtime == mtime
+        )
+        if not args.rebuild and unchanged:
+            logger.info("Skipping unchanged file: %s", rel_path)
+            continue
+
+        store.delete_by_source_file(rel_path)
+        logger.info("Cleared previous vectors for source_file=%s", rel_path)
+
         text = load_text(abs_path)
         meeting_date = infer_meeting_date(
             relative_path=rel_path,
@@ -81,6 +111,21 @@ def main() -> None:
             )
 
         store.upsert(chunks, vectors)
+        logger.info(
+            "Ingested %s -> chunks=%d embeddings=%d upserts=%d",
+            rel_path,
+            len(chunks),
+            len(vectors),
+            len(chunks),
+        )
+
+        manifest_files[rel_path] = {
+            "mtime": mtime,
+            "mtime_ns": mtime_ns,
+            "size": size,
+            "doc_id": doc_id,
+            "ingested_at": datetime.now(timezone.utc).isoformat(),
+        }
 
         logger.info("Meeting date for %s -> %s", rel_path, meeting_date)
         logger.info("Document ID for %s -> %s", rel_path, doc_id)
@@ -88,6 +133,9 @@ def main() -> None:
         logger.info("Generated %d embeddings for %s", len(vectors), rel_path)
         logger.info("Stored %d chunks in Zvec for %s", len(chunks), rel_path)
         logger.info("Loaded %s (%d chars)", rel_path, len(text))
+
+    save_manifest(manifest_path, manifest)
+    logger.info("Saved ingestion manifest: %s", manifest_path)
 
 
 if __name__ == "__main__":
